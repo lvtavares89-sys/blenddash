@@ -2,7 +2,7 @@ import path from "path";
 import { config } from "dotenv";
 config({ path: path.resolve(process.cwd(), ".env") });
 
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { PrismaClient } from "@prisma/client";
 
 const db = new PrismaClient();
@@ -31,6 +31,57 @@ function parseDate(raw: string): Date {
   if (!match) throw new Error(`Invalid date: ${raw}`);
   const [, day, month, year] = match;
   return new Date(`${year}-${month}-${day}T12:00:00.000Z`);
+}
+
+async function scrapeItensVenda(page: Page, placeId: string): Promise<number> {
+  console.log(`  → Scraping itens vendidos...`);
+  await page.goto(`${ZIG_URL}/place/${placeId}/bar-reports#/SoldProducts`, { waitUntil: "networkidle" });
+
+  await page
+    .locator("table")
+    .first()
+    .waitFor({ timeout: 15000 })
+    .catch(() => console.log("  ⚠ Tabela de itens não encontrada"));
+
+  const rows: string[][] = await page.evaluate(() => {
+    const trs = Array.from(document.querySelectorAll("table tr"));
+    return trs.map(row => {
+      const cells = Array.from(row.querySelectorAll("td, th"));
+      return cells.map(c => (c as HTMLElement).innerText?.trim() ?? "").filter(t => t);
+    }).filter(r => r.length > 0);
+  });
+
+  let categoria = "";
+  let count = 0;
+
+  for (const row of rows) {
+    if (row.length === 1 && !row[0].startsWith("Total") && row[0] !== "SKU") {
+      categoria = row[0];
+    } else if (row.length === 5 && row[0] !== "SKU" && !row[1].includes("Devolução")) {
+      const [sku, nome, qtdStr, unitStr, totalStr] = row;
+      const quantidade = parseInt(qtdStr, 10) || 0;
+      if (quantidade < 0) continue;
+      const valorUnitario = parseBRL(unitStr);
+      const valorTotal = parseBRL(totalStr);
+
+      await db.zigItemVenda.upsert({
+        where: { placeId_sku: { placeId, sku } },
+        update: { nome, categoria, quantidade, valorUnitario, valorTotal },
+        create: {
+          id: `${placeId.slice(0, 8)}-${sku}`,
+          placeId,
+          sku,
+          nome,
+          categoria,
+          quantidade,
+          valorUnitario,
+          valorTotal,
+        },
+      });
+      count++;
+    }
+  }
+  return count;
 }
 
 async function main() {
@@ -159,6 +210,10 @@ async function main() {
         );
         totalSync++;
       }
+
+      const itensSync = await scrapeItensVenda(page, place.id);
+      console.log(`  ✓ ${itensSync} itens de vendas sincronizados`);
+      totalSync += itensSync;
     }
 
     await db.zigSyncLog.create({

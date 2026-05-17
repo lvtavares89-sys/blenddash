@@ -15,6 +15,7 @@ model ZigPlace {
   createdAt DateTime    @default(now()) @map("created_at")
 
   eventos ZigEvento[]
+  itens   ZigItemVenda[]
 
   @@map("zig_places")
 }
@@ -46,4 +47,23 @@ model ZigSyncLog {
 
   @@index([executadoEm(sort: Desc)])
   @@map("zig_sync_logs")
+}
+
+model ZigItemVenda {
+  id            String   @id @default(cuid())
+  placeId       String   @map("place_id")
+  categoria     String
+  sku           String
+  nome          String
+  quantidade    Int      @default(0)
+  valorUnitario Decimal  @default(0) @db.Decimal(12, 2) @map("valor_unitario")
+  valorTotal    Decimal  @default(0) @db.Decimal(12, 2) @map("valor_total")
+  atualizadoEm DateTime @default(now()) @updatedAt @map("atualizado_em")
+
+  place ZigPlace @relation(fields: [placeId], references: [id])
+
+  @@unique([placeId, sku])
+  @@index([placeId])
+  @@index([categoria])
+  @@map("zig_itens_venda")
 }

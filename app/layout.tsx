@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed, Barlow, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { Sidebar } from "@/components/Sidebar";
 
 const barlowCondensed = Barlow_Condensed({
   variable: "--font-display",
@@ -32,10 +33,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR">
       <body
-        className={`${barlowCondensed.variable} ${barlow.variable} ${jetbrainsMono.variable} noise scanline min-h-screen`}
-        style={{ background: "#080808", fontFamily: "var(--font-body), sans-serif" }}
+        className={`${barlowCondensed.variable} ${barlow.variable} ${jetbrainsMono.variable} noise scanline`}
+        style={{ background: "#080808", fontFamily: "var(--font-body), sans-serif", margin: 0 }}
       >
-        {children}
+        <div style={{ display: "flex", minHeight: "100vh" }}>
+          <Sidebar />
+          <main style={{ flex: 1, minWidth: 0 }}>
+            {children}
+          </main>
+        </div>
       </body>
     </html>
   );

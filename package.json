@@ -10,7 +10,8 @@
     "zig:sync": "tsx scripts/zig-sync.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "db:itens": "tsx scripts/create-itens-table.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
