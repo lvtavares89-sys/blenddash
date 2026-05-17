@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ZigPlace {
+  id        String      @id
+  nome      String
+  ativo     Boolean     @default(true)
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  eventos ZigEvento[]
+
+  @@map("zig_places")
+}
+
+model ZigEvento {
+  id           String   @id
+  placeId      String   @map("place_id")
+  data         DateTime @db.Date
+  status       String
+  clientes     Int      @default(0)
+  vendas       Decimal  @default(0) @db.Decimal(12, 2)
+  recebimentos Decimal  @default(0) @db.Decimal(12, 2)
+  ticketMedio  Decimal  @default(0) @db.Decimal(12, 2) @map("ticket_medio")
+  atualizadoEm DateTime @default(now()) @updatedAt @map("atualizado_em")
+
+  place ZigPlace @relation(fields: [placeId], references: [id])
+
+  @@index([data(sort: Desc)])
+  @@index([placeId, data(sort: Desc)])
+  @@map("zig_eventos")
+}
+
+model ZigSyncLog {
+  id          String   @id @default(cuid())
+  executadoEm DateTime @default(now()) @map("executado_em")
+  sucesso     Boolean
+  erro        String?
+  eventosSync Int      @default(0) @map("eventos_sync")
+
+  @@index([executadoEm(sort: Desc)])
+  @@map("zig_sync_logs")
+}
