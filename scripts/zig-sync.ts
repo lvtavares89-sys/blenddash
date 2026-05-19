@@ -10,16 +10,42 @@ const db = new PrismaClient();
 const ZIG_URL = "https://dashboard.zigpay.com.br";
 const CREDENTIALS = { org: "blend", login: "bruno", senha: "0802" };
 
-const PLACES = [
-  {
-    id: "5fefd5a0-f496-4316-8032-9ae8014f7a39",
-    nome: "BLEND BBQ FESTIVAL NOVA IGUACU 2026 - 1",
-  },
-  {
-    id: "f8312cc2-c291-4889-9d7c-84a8ccabb20a",
-    nome: "BLEND BBQ FESTIVAL NOVA IGUACU 2026 2",
-  },
+// Fallback caso o auto-detect falhe e o banco esteja vazio
+const PLACES_FALLBACK = [
+  { id: "5fefd5a0-f496-4316-8032-9ae8014f7a39", nome: "BLEND BBQ FESTIVAL NOVA IGUACU 2026 - 1" },
+  { id: "f8312cc2-c291-4889-9d7c-84a8ccabb20a", nome: "BLEND BBQ FESTIVAL NOVA IGUACU 2026 2" },
 ];
+
+async function scrapeListaPlaces(page: Page): Promise<{ id: string; nome: string }[]> {
+  console.log("→ Detectando places disponíveis no ZigPay...");
+  await page.goto(`${ZIG_URL}/`, { waitUntil: "networkidle" });
+
+  await page
+    .locator('a[href*="/place/"]')
+    .first()
+    .waitFor({ timeout: 10000 })
+    .catch(() => {});
+
+  const places = await page.evaluate(() => {
+    const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/place/"]'));
+    const seen = new Set<string>();
+    const out: { id: string; nome: string }[] = [];
+    for (const link of links) {
+      const href = link.getAttribute("href") ?? "";
+      const m = href.match(/\/place\/([a-f0-9-]{36})/i);
+      if (!m) continue;
+      const id = m[1];
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const nome = (link.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (nome) out.push({ id, nome });
+    }
+    return out;
+  });
+
+  console.log(`  Detectados ${places.length} places`);
+  return places;
+}
 
 function parseBRL(raw: string): number {
   return parseFloat(raw.replace(/[R$\s.]/g, "").replace(",", ".")) || 0;
@@ -103,17 +129,42 @@ async function main() {
 
     console.log("✓ Login realizado");
 
-    // ─── Upsert places ────────────────────────────────────────
-    for (const place of PLACES) {
+    // ─── Auto-detectar places do ZigPay ───────────────────────
+    let detectados: { id: string; nome: string }[] = [];
+    try {
+      detectados = await scrapeListaPlaces(page);
+    } catch (e) {
+      console.log("  ⚠ Falha na auto-detecção:", e instanceof Error ? e.message : e);
+    }
+
+    for (const p of detectados) {
       await db.zigPlace.upsert({
-        where: { id: place.id },
-        update: { nome: place.nome },
-        create: { id: place.id, nome: place.nome },
+        where: { id: p.id },
+        update: { nome: p.nome },
+        create: { id: p.id, nome: p.nome },
       });
     }
 
-    // ─── Scrape each place ────────────────────────────────────
-    for (const place of PLACES) {
+    // ─── Carregar places ativos do banco ──────────────────────
+    let placesAtivos = await db.zigPlace.findMany({ where: { ativo: true } });
+
+    // Fallback: se banco estiver vazio, semeia com os places conhecidos
+    if (placesAtivos.length === 0) {
+      console.log("  ⚠ Banco sem places ativos — usando fallback");
+      for (const p of PLACES_FALLBACK) {
+        await db.zigPlace.upsert({
+          where: { id: p.id },
+          update: { nome: p.nome },
+          create: { id: p.id, nome: p.nome },
+        });
+      }
+      placesAtivos = await db.zigPlace.findMany({ where: { ativo: true } });
+    }
+
+    console.log(`\n→ Sincronizando ${placesAtivos.length} places ativos`);
+
+    // ─── Scrape each active place ─────────────────────────────
+    for (const place of placesAtivos) {
       console.log(`\n→ Scraping: ${place.nome}`);
       await page.goto(`${ZIG_URL}/place/${place.id}`, { waitUntil: "networkidle" });
 

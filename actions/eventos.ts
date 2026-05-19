@@ -1,6 +1,11 @@
 "use server";
 
+import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { db } from "@/lib/prisma";
+import { extrairFestival } from "@/lib/festival";
+
+const COOKIE_FESTIVAL = "festival_atual";
 
 export interface PlaceData {
   placeId: string;
@@ -12,7 +17,7 @@ export interface PlaceData {
 }
 
 export interface DiaEvento {
-  data: string; // ISO date string
+  data: string;
   status: "aberto" | "encerrado";
   totalClientes: number;
   totalVendas: number;
@@ -30,8 +35,25 @@ export interface EventoKpis {
   eventosTotais: number;
 }
 
-export async function buscarEventosEmCurso(): Promise<DiaEvento[]> {
+export interface FestivalInfo {
+  nome: string;
+  placesCount: number;
+  placesAtivos: number;
+  primeiraData: Date | null;
+  ultimaData: Date | null;
+  totalEventos: number;
+}
+
+async function placeIdsDoFestival(festival?: string): Promise<string[] | undefined> {
+  if (!festival) return undefined;
+  const places = await db.zigPlace.findMany();
+  return places.filter(p => extrairFestival(p.nome) === festival).map(p => p.id);
+}
+
+export async function buscarEventosEmCurso(festival?: string): Promise<DiaEvento[]> {
+  const placeIds = await placeIdsDoFestival(festival);
   const eventos = await db.zigEvento.findMany({
+    where: placeIds ? { placeId: { in: placeIds } } : {},
     include: { place: true },
     orderBy: { data: "desc" },
   });
@@ -82,8 +104,11 @@ export async function buscarEventosEmCurso(): Promise<DiaEvento[]> {
   );
 }
 
-export async function buscarKpisEvento(): Promise<EventoKpis> {
-  const eventos = await db.zigEvento.findMany();
+export async function buscarKpisEvento(festival?: string): Promise<EventoKpis> {
+  const placeIds = await placeIdsDoFestival(festival);
+  const eventos = await db.zigEvento.findMany({
+    where: placeIds ? { placeId: { in: placeIds } } : {},
+  });
 
   let totalVendas = 0;
   let totalRecebimentos = 0;
@@ -115,4 +140,88 @@ export async function buscarUltimoSync(): Promise<{
     orderBy: { executadoEm: "desc" },
     select: { executadoEm: true, sucesso: true },
   });
+}
+
+export async function listarFestivais(): Promise<FestivalInfo[]> {
+  const places = await db.zigPlace.findMany();
+  const eventos = await db.zigEvento.findMany({
+    select: { placeId: true, data: true },
+  });
+
+  const eventosByPlace = new Map<string, Date[]>();
+  for (const ev of eventos) {
+    if (!eventosByPlace.has(ev.placeId)) eventosByPlace.set(ev.placeId, []);
+    eventosByPlace.get(ev.placeId)!.push(ev.data);
+  }
+
+  const byFestival = new Map<string, FestivalInfo>();
+  for (const place of places) {
+    const nome = extrairFestival(place.nome);
+    const datas = eventosByPlace.get(place.id) ?? [];
+
+    if (!byFestival.has(nome)) {
+      byFestival.set(nome, {
+        nome,
+        placesCount: 0,
+        placesAtivos: 0,
+        primeiraData: null,
+        ultimaData: null,
+        totalEventos: 0,
+      });
+    }
+
+    const f = byFestival.get(nome)!;
+    f.placesCount++;
+    if (place.ativo) f.placesAtivos++;
+    f.totalEventos += datas.length;
+
+    for (const d of datas) {
+      if (!f.primeiraData || d < f.primeiraData) f.primeiraData = d;
+      if (!f.ultimaData || d > f.ultimaData) f.ultimaData = d;
+    }
+  }
+
+  return Array.from(byFestival.values()).sort((a, b) => {
+    const aTime = a.ultimaData?.getTime() ?? 0;
+    const bTime = b.ultimaData?.getTime() ?? 0;
+    return bTime - aTime;
+  });
+}
+
+export async function festivalAtual(): Promise<string | undefined> {
+  const cookieStore = await cookies();
+  const fromCookie = cookieStore.get(COOKIE_FESTIVAL)?.value;
+
+  const festivais = await listarFestivais();
+  if (festivais.length === 0) return undefined;
+
+  if (fromCookie && festivais.some(f => f.nome === fromCookie)) {
+    return fromCookie;
+  }
+  return festivais[0].nome;
+}
+
+export async function setFestivalAtual(nome: string): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set(COOKIE_FESTIVAL, nome, {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+    sameSite: "lax",
+  });
+  revalidatePath("/", "layout");
+}
+
+export async function togglePlaceAtivo(placeId: string): Promise<void> {
+  const place = await db.zigPlace.findUnique({ where: { id: placeId } });
+  if (!place) return;
+  await db.zigPlace.update({
+    where: { id: placeId },
+    data: { ativo: !place.ativo },
+  });
+  revalidatePath("/admin/festivais");
+}
+
+export async function listarPlacesDoFestival(festival: string) {
+  const places = await db.zigPlace.findMany({ orderBy: { nome: "asc" } });
+  return places.filter(p => extrairFestival(p.nome) === festival);
 }

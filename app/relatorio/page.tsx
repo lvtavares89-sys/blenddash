@@ -1,5 +1,5 @@
 import { buscarItensVendidos, buscarRankingItens } from "@/actions/itens";
-import { buscarUltimoSync } from "@/actions/eventos";
+import { buscarUltimoSync, festivalAtual } from "@/actions/eventos";
 import { formatBRL } from "@/lib/format";
 import { CategoriaAccordion } from "@/components/CategoriaAccordion";
 
@@ -7,9 +7,10 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function RelatorioPage() {
+  const festival = await festivalAtual();
   const [categorias, ranking, ultimoSync] = await Promise.all([
-    buscarItensVendidos().catch(() => []),
-    buscarRankingItens(15).catch(() => []),
+    buscarItensVendidos(festival).catch(() => []),
+    buscarRankingItens(15, festival).catch(() => []),
     buscarUltimoSync().catch(() => null),
   ]);
 
@@ -30,7 +31,7 @@ export default async function RelatorioPage() {
           Relatório de Itens
         </h1>
         <p style={{ fontFamily: "'Barlow', sans-serif", fontSize: "11px", color: "#3a3a3a", marginTop: "6px" }}>
-          PDV 1 + PDV 2 — acumulado do evento
+          {festival ?? "Sem festival"} — acumulado do evento
           {ultimoSync && (
             <span style={{ marginLeft: "12px" }}>
               · sync {new Date(ultimoSync.executadoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}

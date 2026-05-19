@@ -1,6 +1,7 @@
 "use server";
 
 import { db } from "@/lib/prisma";
+import { extrairFestival, nomePdv } from "@/lib/festival";
 
 export interface ItemVenda {
   sku: string;
@@ -19,13 +20,20 @@ export interface CategoriaVenda {
   itens: ItemVenda[];
 }
 
-export async function buscarItensVendidos(): Promise<CategoriaVenda[]> {
+async function placeIdsDoFestival(festival?: string): Promise<string[] | undefined> {
+  if (!festival) return undefined;
+  const places = await db.zigPlace.findMany();
+  return places.filter(p => extrairFestival(p.nome) === festival).map(p => p.id);
+}
+
+export async function buscarItensVendidos(festival?: string): Promise<CategoriaVenda[]> {
+  const placeIds = await placeIdsDoFestival(festival);
   const itens = await db.zigItemVenda.findMany({
+    where: placeIds ? { placeId: { in: placeIds } } : {},
     include: { place: true },
     orderBy: [{ categoria: "asc" }, { valorTotal: "desc" }],
   });
 
-  // Merge same produto (same nome) across places by nome+categoria key
   const merged = new Map<string, ItemVenda>();
 
   for (const item of itens) {
@@ -46,13 +54,12 @@ export async function buscarItensVendidos(): Promise<CategoriaVenda[]> {
     m.valorTotal += Number(item.valorTotal);
     m.places.push({
       placeId: item.placeId,
-      nome: item.place.nome.includes("2026 2") ? "PDV 2" : "PDV 1",
+      nome: nomePdv(item.place.nome),
       quantidade: item.quantidade,
       valorTotal: Number(item.valorTotal),
     });
   }
 
-  // Group by category
   const byCategoria = new Map<string, CategoriaVenda>();
   for (const item of merged.values()) {
     if (!byCategoria.has(item.categoria)) {
@@ -69,7 +76,6 @@ export async function buscarItensVendidos(): Promise<CategoriaVenda[]> {
     cat.itens.push(item);
   }
 
-  // Sort categories by totalValor desc, items within each category by valorTotal desc
   return Array.from(byCategoria.values())
     .sort((a, b) => b.totalValor - a.totalValor)
     .map(cat => ({
@@ -78,7 +84,7 @@ export async function buscarItensVendidos(): Promise<CategoriaVenda[]> {
     }));
 }
 
-export async function buscarRankingItens(limit = 20): Promise<ItemVenda[]> {
-  const cats = await buscarItensVendidos();
+export async function buscarRankingItens(limit = 20, festival?: string): Promise<ItemVenda[]> {
+  const cats = await buscarItensVendidos(festival);
   return cats.flatMap(c => c.itens).sort((a, b) => b.valorTotal - a.valorTotal).slice(0, limit);
 }

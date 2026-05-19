@@ -2,6 +2,7 @@ import {
   buscarEventosEmCurso,
   buscarKpisEvento,
   buscarUltimoSync,
+  festivalAtual,
 } from "@/actions/eventos";
 import { KpiCard } from "@/components/KpiCard";
 import { DiaCard } from "@/components/DiaCard";
@@ -13,9 +14,10 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function EventoPage() {
+  const festival = await festivalAtual();
   const [dias, kpis, ultimoSync] = await Promise.all([
-    buscarEventosEmCurso().catch(() => []),
-    buscarKpisEvento().catch(() => ({
+    buscarEventosEmCurso(festival).catch(() => []),
+    buscarKpisEvento(festival).catch(() => ({
       totalVendas: 0,
       totalRecebimentos: 0,
       totalClientes: 0,
@@ -130,7 +132,7 @@ export default async function EventoPage() {
                   lineHeight: 1,
                 }}
               >
-                Blend BBQ Festival Nova Iguaçu 2026
+                {festival ?? "Sem festival selecionado"}
               </h1>
               <p
                 style={{
